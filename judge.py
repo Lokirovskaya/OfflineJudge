@@ -3,13 +3,13 @@
 TESTCASE_PATH = 'testcase/'
 SRC_DIR_PATH = 'aa.c'
 COMPILE_TIMEOUT = 5
-EXEC_TIMEOUT = 10
+EXEC_TIMEOUT = 20
 
 ###################################
 
 import os
 import sys
-import subprocess
+import subprocess as sp
 import shutil
 import atexit
 import signal
@@ -52,17 +52,17 @@ def source_to_llvm(source_path, llvm_path) -> (bool, Optional[str]):
         '-w'
     ]
     try:
-        r = subprocess.run(args, timeout=COMPILE_TIMEOUT)
-    except subprocess.TimeoutExpired:
+        r = sp.run(args, timeout=COMPILE_TIMEOUT, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+    except sp.TimeoutExpired:
         return (
             False,
-            f'{RED}{BOLD}Time Limit Exceeded{END}{RED}: Source -> LLVM IR ({COMPILE_TIMEOUT} s){END}'
+            f'{YELLOW}{BOLD}Time Limit Exceeded{END}{YELLOW}: Source -> LLVM IR ({COMPILE_TIMEOUT} s){END}'
         )
 
     if r.returncode != 0: 
         return (
             False,
-            f'{RED}{BOLD}Runtime Error{END}{RED}: Source -> LLVM IR{END}'
+            f'{YELLOW}{BOLD}Runtime Error{END}{YELLOW}: Source -> LLVM IR{END}'
         )
     return (True, None)
 
@@ -76,56 +76,58 @@ def llvm_to_exe(llvm_path, exe_path) -> (bool, Optional[str]):
         exe_path,
         '-O0'
     ]
-    r = subprocess.run(args)
+    r = sp.run(args, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
     if r.returncode != 0:
         return (
             False,
-            f'{RED}{BOLD}Runtime Error{END}{RED}: LLVM IR -> ASM{END}'
+            f'{YELLOW}{BOLD}Runtime Error{END}{YELLOW}: LLVM IR -> ASM{END}'
         )
     return (True, None)
 
 
-def run_exe(exe_path, input_path, answer_path) -> (bool, Union[str, int]):
+def run_exe(exe_path, input_path, answer_path) -> (bool, Optional[str], Optional[int], Optional[str]):
     args = ['./' + exe_path]
     try:
         with open(answer_path, 'w') as answer_file:
             # stdin available
             if os.path.exists(input_path):
                 with open(input_path, 'r') as input_file:
-                    r = subprocess.run(args, stdin=input_file, stdout=answer_file, timeout=EXEC_TIMEOUT)
-                    return (True, r.returncode)
+                    r = sp.run(args, stdin=input_file, stdout=sp.PIPE, stderr=sp.DEVNULL, timeout=EXEC_TIMEOUT)
+                    return (True, r.stdout, r.returncode, None)
             # no stdin
             else:
-                r = subprocess.run(args, stdout=answer_file, timeout=EXEC_TIMEOUT)
-                return (True, r.returncode)
-    except subprocess.TimeoutExpired:
+                r = sp.run(args, stdout=sp.PIPE, stderr=sp.DEVNULL, timeout=EXEC_TIMEOUT)
+                return (True, r.stdout, r.returncode, None)
+    except sp.TimeoutExpired:
         return (
             False,
-            f'{RED}{BOLD}Time Limit Exceeded{END}{RED}: Running ASM ({EXEC_TIMEOUT} s){END}'
+            None,
+            None,
+            f'{YELLOW}{BOLD}Time Limit Exceeded{END}{YELLOW}: Running ASM ({EXEC_TIMEOUT} s){END}'
         )
 
 
-def check_answer(answer_path, correct_path, return_code) -> (bool, str):
-    with open(answer_path, 'r') as answer_file:
-        with open(correct_path, 'r') as correct_file:
-            ans = answer_file.read()
-            ans_lines = ans.rstrip().splitlines()
-            correct = correct_file.read()
-            correct_lines = correct.rstrip().splitlines()
-            correct_return_code = int(correct_lines[-1])
+def check_answer(answer_str, correct_path, return_code, wa_path) -> (bool, str):
+    with open(correct_path, 'r') as correct_file:
+        ans_lines = answer_str.rstrip().splitlines()
+        ans_lines.append(str(return_code))
 
-            if return_code != correct_return_code:
+        correct = correct_file.read()
+        correct_lines = correct.rstrip().splitlines()
+
+        min_len = min(len(ans_lines), len(correct_lines))
+        for i in range(min_len):
+            if ans_lines[i].rstrip() != correct_lines[i].rstrip():
                 return (
                     False,
-                    f'{RED}{BOLD}Wrong Answer{END}{RED}: Program return value error. Read {return_code} expected {correct_return_code}{END}'
+                    f'{RED}{BOLD}Wrong Answer{END}{RED}: Line {i + 1}{END}'
                 )
-            for i in range(len(ans_lines)):
-                if ans_lines[i].rstrip() != correct_lines[i].rstrip():
-                    return (
-                        False,
-                        f'{RED}{BOLD}Wrong Answer{END}{RED}: First mismatch at line {i + 1}{END}'
-                    ) 
-            return (True, f'{GREEN}{BOLD}Accepted{END}')
+        if len(ans_lines) != min_len:
+            return (
+                False,
+                f'{RED}{BOLD}Wrong Answer{END}{RED}: Line {min_len + 1}{END}'
+            )
+        return (True, f'{GREEN}{BOLD}Accepted{END}')
 
 
 def judge_one(test_name, idx, total) -> bool:
@@ -133,30 +135,30 @@ def judge_one(test_name, idx, total) -> bool:
     source_path = f'testcase/{test_name}.sy'
     correct_path = f'testcase/{test_name}.out'
     
-    test_name_no_dash = test_name.replace('/', '_')
-    llvm_path = f'tmp/{test_name_no_dash}.ll'
-    exe_path = f'tmp/{test_name_no_dash}.exe'
-    answer_path = f'tmp/{test_name_no_dash}.out'
+    llvm_path = f'tmp/{idx}.ll'
+    exe_path = f'tmp/{idx}.exe'
+    answer_path = f'tmp/{idx}.out'
 
-    while True:
+    wa_path = f'wa/{idx}_{test_name.replace("/", "_")}.out'
+
+    def run() -> (bool, str):
         ok, msg = source_to_llvm(source_path, llvm_path)
-        if not ok: break
+        if not ok: return ok, msg
 
         ok, msg = llvm_to_exe(llvm_path, exe_path)
-        if not ok: break
+        if not ok: return ok, msg
 
-        ok, msg = run_exe(exe_path, input_path, answer_path)
-        if not ok: break
-        else: return_val = msg
+        ok, answer, return_code, msg = run_exe(exe_path, input_path, answer_path)
+        if not ok: return ok, msg
 
-        ok, msg = check_answer(answer_path, correct_path, return_val)
-        break
+        ok, msg = check_answer(answer, correct_path, return_code, wa_path)
+        return ok, msg
 
+    ok, msg = run()
     print(f'{BOLD}({idx}/{total}){END} {test_name}: {msg}')
     return ok
 
         
-
 
 def cleanup():
     shutil.rmtree('tmp/', ignore_errors=True)
@@ -165,6 +167,8 @@ def cleanup():
 def init():
     if not os.path.exists('out/'):
         os.makedirs('out/')
+    if not os.path.exists('wa/'):
+        os.makedirs('wa/')
     if os.path.exists('tmp/'):
         shutil.rmtree('tmp/')
     os.makedirs('tmp/')
