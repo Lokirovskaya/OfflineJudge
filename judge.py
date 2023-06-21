@@ -2,8 +2,8 @@
 
 TESTCASE_PATH = 'testcase/'
 SRC_DIR_PATH = 'aa.c'
-COMPILE_TIMEOUT = 1
-EXEC_TIMEOUT = 1
+COMPILE_TIMEOUT = 5
+EXEC_TIMEOUT = 10
 
 ###################################
 
@@ -13,12 +13,15 @@ import subprocess
 import shutil
 import atexit
 import signal
+import multiprocessing as mp
+from typing import Union, Optional
 
 
 COMPILER_TARGET_PATH = 'out/compiler.exe'
 
 RED = '\x1b[31m'
 GREEN = '\x1b[32m'
+YELLOW = '\x1b[33m'
 BOLD = '\x1b[1m'
 END = '\x1b[0m'
 
@@ -37,7 +40,7 @@ def compile_compiler():
     pass
 
 
-def source_to_llvm(source_path, llvm_path):
+def source_to_llvm(source_path, llvm_path) -> (bool, Optional[str]):
     args = [
         'clang',
         '-S',
@@ -51,16 +54,20 @@ def source_to_llvm(source_path, llvm_path):
     try:
         r = subprocess.run(args, timeout=COMPILE_TIMEOUT)
     except subprocess.TimeoutExpired:
-        print(f'{RED}{BOLD}Time Limit Exceeded{END}{RED}: Source -> LLVM IR ({COMPILE_TIMEOUT} s){END}')
-        return False
+        return (
+            False,
+            f'{RED}{BOLD}Time Limit Exceeded{END}{RED}: Source -> LLVM IR ({COMPILE_TIMEOUT} s){END}'
+        )
 
     if r.returncode != 0: 
-        print(f'{RED}{BOLD}Runtime Error{END}{RED}: Source -> LLVM IR{END}')
-        return False
-    return True
+        return (
+            False,
+            f'{RED}{BOLD}Runtime Error{END}{RED}: Source -> LLVM IR{END}'
+        )
+    return (True, None)
 
 
-def llvm_to_exe(llvm_path, exe_path):
+def llvm_to_exe(llvm_path, exe_path) -> (bool, Optional[str]):
     args = [
         'clang',
         llvm_path,
@@ -71,12 +78,14 @@ def llvm_to_exe(llvm_path, exe_path):
     ]
     r = subprocess.run(args)
     if r.returncode != 0:
-        print(f'{RED}{BOLD}Runtime Error{END}{RED}: LLVM IR -> ASM{END}')
-        return False
-    return True
+        return (
+            False,
+            f'{RED}{BOLD}Runtime Error{END}{RED}: LLVM IR -> ASM{END}'
+        )
+    return (True, None)
 
 
-def run_exe(exe_path, input_path, answer_path):
+def run_exe(exe_path, input_path, answer_path) -> (bool, Union[str, int]):
     args = ['./' + exe_path]
     try:
         with open(answer_path, 'w') as answer_file:
@@ -84,17 +93,19 @@ def run_exe(exe_path, input_path, answer_path):
             if os.path.exists(input_path):
                 with open(input_path, 'r') as input_file:
                     r = subprocess.run(args, stdin=input_file, stdout=answer_file, timeout=EXEC_TIMEOUT)
-                    return r.returncode
+                    return (True, r.returncode)
             # no stdin
             else:
                 r = subprocess.run(args, stdout=answer_file, timeout=EXEC_TIMEOUT)
-                return r.returncode
+                return (True, r.returncode)
     except subprocess.TimeoutExpired:
-        print(f'{RED}{BOLD}Time Limit Exceeded{END}{RED}: Running ASM ({EXEC_TIMEOUT} s){END}')
-        return None
+        return (
+            False,
+            f'{RED}{BOLD}Time Limit Exceeded{END}{RED}: Running ASM ({EXEC_TIMEOUT} s){END}'
+        )
 
 
-def check_answer(answer_path, correct_path, return_code):
+def check_answer(answer_path, correct_path, return_code) -> (bool, str):
     with open(answer_path, 'r') as answer_file:
         with open(correct_path, 'r') as correct_file:
             ans = answer_file.read()
@@ -104,14 +115,20 @@ def check_answer(answer_path, correct_path, return_code):
             correct_return_code = int(correct_lines[-1])
 
             if return_code != correct_return_code:
-                return f'{RED}{BOLD}Wrong Answer{END}{RED}: Program return value error. Read {return_code} expected {correct_return_code}{END}'
+                return (
+                    False,
+                    f'{RED}{BOLD}Wrong Answer{END}{RED}: Program return value error. Read {return_code} expected {correct_return_code}{END}'
+                )
             for i in range(len(ans_lines)):
                 if ans_lines[i].rstrip() != correct_lines[i].rstrip():
-                    return f'{RED}{BOLD}Wrong Answer{END}{RED}: First mismatch at line {i + 1}{END}'
-            return f'{GREEN}{BOLD}Accepted{END}'
+                    return (
+                        False,
+                        f'{RED}{BOLD}Wrong Answer{END}{RED}: First mismatch at line {i + 1}{END}'
+                    ) 
+            return (True, f'{GREEN}{BOLD}Accepted{END}')
 
 
-def judge(test_name):
+def judge_one(test_name, idx, total) -> bool:
     input_path = f'testcase/{test_name}.in'
     source_path = f'testcase/{test_name}.sy'
     correct_path = f'testcase/{test_name}.out'
@@ -121,22 +138,29 @@ def judge(test_name):
     exe_path = f'tmp/{test_name_no_dash}.exe'
     answer_path = f'tmp/{test_name_no_dash}.out'
 
-    if not source_to_llvm(source_path, llvm_path): 
-        return False
+    while True:
+        ok, msg = source_to_llvm(source_path, llvm_path)
+        if not ok: break
 
-    if not llvm_to_exe(llvm_path, exe_path):
-        return False
+        ok, msg = llvm_to_exe(llvm_path, exe_path)
+        if not ok: break
 
-    return_val = run_exe(exe_path, input_path, answer_path)
-    if return_val == None:  # TLE
-        return False
-    msg = check_answer(answer_path, correct_path, return_val)
-    print(msg)
-    return True
+        ok, msg = run_exe(exe_path, input_path, answer_path)
+        if not ok: break
+        else: return_val = msg
+
+        ok, msg = check_answer(answer_path, correct_path, return_val)
+        break
+
+    print(f'{BOLD}({idx}/{total}){END} {test_name}: {msg}')
+    return ok
+
+        
 
 
 def cleanup():
     shutil.rmtree('tmp/', ignore_errors=True)
+
 
 def init():
     if not os.path.exists('out/'):
@@ -159,26 +183,26 @@ def init():
 if __name__ == '__main__':
 
     init()
-    print('Compiling Java...')
+    print(f'{BOLD}Compiling Java...{END}')
     compile_compiler()
-    print('Test start! You can press Ctrl-C to cancel')
 
-    test_list = get_tests_names()
+    test_list = [(i + 1, test) for i, test in enumerate(get_tests_names())]
+    print(f'{BOLD}Test start!{END} You can press Ctrl-C to cancel')
+
+    num_cores = mp.cpu_count()
+    print(f'{BOLD}Running on{END} {YELLOW}{BOLD}{num_cores}{END} {BOLD}cores!{END}')
+    pool = mp.Pool(processes=num_cores)
+    result_list = []
+    for idx, test_name in test_list:
+        result = pool.apply_async(judge_one, (test_name, idx, len(test_list)))
+        result_list.append(result)
+    pool.close()
+    pool.join()
+
+    result_list = [result.get() for result in result_list]
+    passed = result_list.count(True)
     total = len(test_list)
-    current = 0
-    passed = 0
-    failed = 0
-
-    for test_name in test_list:
-        current += 1
-        print(f'{BOLD}({current}/{total}){END} {test_name}: ', end='')
-        sys.stdout.flush()
-
-        if judge(test_name):
-            passed += 1
-        else:
-            failed += 1
-            
-    print(f'\n{BOLD}Test Finished!{END} {GREEN}{BOLD}Accepted: ({passed}/{total}){END} {RED}{BOLD}Failed: ({failed}/{total}){END}')
+              
+    print(f'\n{BOLD}Test Finished!{END} {GREEN}{BOLD}Accepted: ({passed}/{total}){END} {RED}{BOLD}Failed: ({total - passed}/{total}){END}')
     cleanup()
     input('Press Enter to Exit')
