@@ -12,7 +12,8 @@ import subprocess as sp
 import shutil
 import atexit
 import signal
-import multiprocessing as mp
+import multiprocessing
+import concurrent.futures as cf
 from typing import Union, Optional
 
 
@@ -26,8 +27,8 @@ END = '\x1b[0m'
 
 def get_tests_names():
     test_set = set()
-    for root, dirs, files in os.walk(TESTCASE_PATH):
-        relative_path = os.path.relpath(root, TESTCASE_PATH)
+    for root, dirs, files in os.walk('testcase/'):
+        relative_path = os.path.relpath(root, 'testcase/')
         for file_name in files:
             file_path = os.path.join(relative_path, file_name.split('.')[0]).replace('\\', '/')
             test_set.add(file_path)
@@ -59,7 +60,7 @@ def source_to_llvm(source_path, llvm_path, **kwargs) -> (bool, Optional[str]):
         )
 
     if r.returncode != 0:
-        with open(kwargs[re_path], 'w') as re_file:
+        with open(kwargs['re_path'], 'w') as re_file:
             re_file.write(r.stderr.decode('utf-8'))
         return (
             False,
@@ -75,11 +76,12 @@ def llvm_to_exe(llvm_path, exe_path, **kwargs) -> (bool, Optional[str]):
         'lib/lib.o',
         '-o',
         exe_path,
-        '-O0'
+        '-O0',
+        '-v'
     ]
     r = sp.run(args, stdout=sp.DEVNULL, stderr=sp.PIPE)
     if r.returncode != 0:
-        with open(kwargs[re_path], 'w') as re_file:
+        with open(kwargs['re_path'], 'w') as re_file:
             re_file.write(r.stderr.decode('utf-8'))
         return (
             False,
@@ -112,11 +114,11 @@ def run_exe(exe_path, input_path, **kwargs) -> (bool, Optional[str], Optional[in
 
 def check_answer(answer_str, correct_path, return_code, **kwargs) -> (bool, str):
     def dump_wa(wa_lines):
-        with open(kwargs[wa_path], 'w') as wa_file:
+        with open(kwargs['wa_path'], 'w') as wa_file:
             wa_file.writelines(wa_lines)
     def create_diff_bat():
-        with open(kwargs[diff_path], 'w') as diff_file:
-            diff_file.write(f'code --diff ../{kwargs[wa_path]} ../{correct_path}')
+        with open(kwargs['diff_path'], 'w') as diff_file:
+            diff_file.write(f'code --diff ../{kwargs["wa_path"]} ../{correct_path}')
             
     with open(correct_path, 'r') as correct_file:
         # strip line ends and file end
@@ -154,9 +156,10 @@ def judge_one(test_name, idx, total) -> bool:
     llvm_path = f'tmp/{idx}.ll'
     exe_path = f'tmp/{idx}.exe'
 
-    wa_path = f'wa/wa_out/{idx}_WA_{test_name.replace("/", "_")}.out'
-    diff_path = f'wa/{idx}_WA_show_diff.bat'
-    re_path = f'wa/{idx}_RE_{test_name.replace("/", "_")}.txt'
+    test_name_no_dash = test_name.replace('/', '_')
+    wa_path = f'wa/wa_out/{idx}_WA_{test_name_no_dash}.out'
+    diff_path = f'wa/{idx}_WA_{test_name_no_dash}_show_diff.bat'
+    re_path = f'wa/{idx}_RE_{test_name_no_dash}.txt'
 
     def run() -> (bool, str):
         ok, msg = source_to_llvm(source_path, llvm_path, re_path=re_path)
@@ -215,17 +218,18 @@ if __name__ == '__main__':
     test_list = [(i + 1, test) for i, test in enumerate(get_tests_names())]
     print(f'{BOLD}Test start!{END} You can press Ctrl-C to cancel')
 
-    num_cores = mp.cpu_count()
+    num_cores = multiprocessing.cpu_count()
     print(f'{BOLD}Running on{END} {YELLOW}{BOLD}{num_cores}{END} {BOLD}cores!{END}')
-    pool = mp.Pool(processes=num_cores)
+    
+    executor = cf.ProcessPoolExecutor(max_workers=num_cores)
+    futures = [executor.submit(judge_one, test_name, idx, len(test_list))
+               for idx, test_name in test_list]
+    
     result_list = []
-    for idx, test_name in test_list:
-        result = pool.apply_async(judge_one, (test_name, idx, len(test_list)))
+    for future in cf.as_completed(futures):
+        result = future.result()
         result_list.append(result)
-    pool.close()
-    pool.join()
-
-    result_list = [result.get() for result in result_list]
+        
     passed = result_list.count(True)
     total = len(result_list)
               
