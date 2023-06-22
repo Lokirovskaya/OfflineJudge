@@ -203,8 +203,8 @@ def init():
     mkdir('wa/wa_out')
     
 
-# return True means all AC
-def main() -> bool:
+if __name__ == '__main__':
+    
     init()
     print(f'{BOLD}Compiling Java...{END}')
     compile_compiler()
@@ -230,6 +230,3 @@ def main() -> bool:
     print(f'\n{BOLD}Test Finished!{END} {GREEN}{BOLD}Accepted: ({passed}/{total}){END} {RED}{BOLD}Failed: ({total - passed}/{total}){END}')
     cleanup()
     input('Press Enter to Exit') # comment this line when CI/CD
-    return passed == total
-
-main()
