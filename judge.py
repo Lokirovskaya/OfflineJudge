@@ -114,7 +114,7 @@ def run_exe(exe_path, input_path, **kwargs) -> (bool, Optional[str], Optional[in
         )
 
 
-def check_answer(answer_str, correct_path, return_code, **kwargs) -> (bool, str):
+def check_ans(ans_str, correct_path, return_code, **kwargs) -> (bool, str):
     def dump_wa(wa_lines):
         with open(kwargs['wa_path'], 'w') as wa_file:
             for line in wa_lines:
@@ -125,7 +125,7 @@ def check_answer(answer_str, correct_path, return_code, **kwargs) -> (bool, str)
             
     with open(correct_path, 'r') as correct_file:
         # strip line ends and file end
-        ans_lines = [line.rstrip() for line in answer_str.rstrip().splitlines()] 
+        ans_lines = [line.rstrip() for line in ans_str.rstrip().splitlines()] 
         ans_lines.append(str(return_code))
 
         correct_str = correct_file.read()
@@ -171,10 +171,10 @@ def judge_one(test_name, idx, total) -> bool:
         ok, msg = llvm_to_exe(llvm_path, exe_path, re_path=re_path)
         if not ok: return ok, msg
 
-        ok, answer, return_code, msg = run_exe(exe_path, input_path)
+        ok, ans, return_code, msg = run_exe(exe_path, input_path)
         if not ok: return ok, msg
 
-        ok, msg = check_answer(answer, correct_path, return_code, wa_path=wa_path, diff_path=diff_path)
+        ok, msg = check_ans(ans, correct_path, return_code, wa_path=wa_path, diff_path=diff_path)
         return ok, msg
 
     ok, msg = run()
