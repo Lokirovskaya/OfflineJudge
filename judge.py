@@ -10,8 +10,6 @@ import os
 import sys
 import subprocess as sp
 import shutil
-import atexit
-import signal
 import multiprocessing
 import concurrent.futures as cf
 from typing import Union, Optional
@@ -49,14 +47,14 @@ def source_to_llvm(source_path, llvm_path, **kwargs) -> (bool, Optional[str]):
         source_path,
         '-o',
         llvm_path,
-        '-w'
+        '-w',
     ]
     try:
         r = sp.run(args, timeout=COMPILE_TIMEOUT, stdout=sp.PIPE, stderr=sp.PIPE)
     except sp.TimeoutExpired:
         return (
             False,
-            f'{YELLOW}{BOLD}Time Limit Exceeded{END}{YELLOW}: Running Source -> LLVM IR ({COMPILE_TIMEOUT} s){END}'
+            f'{YELLOW}{BOLD}Time Limit Exceeded{END}{YELLOW} when running your compiler ({COMPILE_TIMEOUT} s).{END}'
         )
 
     if r.returncode != 0:
@@ -65,7 +63,7 @@ def source_to_llvm(source_path, llvm_path, **kwargs) -> (bool, Optional[str]):
             re_file.write(r.stderr)
         return (
             False,
-            f'{YELLOW}{BOLD}Runtime Error{END}{YELLOW}: Source -> LLVM IR{END}'
+            f'{YELLOW}{BOLD}Runtime Error{END}{YELLOW} when running your compiler, stderr in {kwargs["re_path"]}{END}'
         )
     return (True, None)
 
@@ -78,7 +76,6 @@ def llvm_to_exe(llvm_path, exe_path, **kwargs) -> (bool, Optional[str]):
         '-o',
         exe_path,
         '-O0',
-        '-v'
     ]
     r = sp.run(args, stdout=sp.PIPE, stderr=sp.PIPE)
     if r.returncode != 0:
@@ -87,7 +84,7 @@ def llvm_to_exe(llvm_path, exe_path, **kwargs) -> (bool, Optional[str]):
             re_file.write(r.stderr)
         return (
             False,
-            f'{YELLOW}{BOLD}Runtime Error{END}{YELLOW}: LLVM IR -> ASM{END}'
+            f'{YELLOW}{BOLD}Runtime Error{END}{YELLOW} when compiling LLVM IR, stderr in {kwargs["re_path"]}{END}'
         )
     return (True, None)
 
@@ -100,17 +97,17 @@ def run_exe(exe_path, input_path, **kwargs) -> (bool, Optional[str], Optional[in
         if os.path.exists(input_path):
             with open(input_path, 'r') as input_file:
                 r = sp.run(args, stdin=input_file, stdout=sp.PIPE, stderr=sp.DEVNULL, timeout=EXEC_TIMEOUT)
-                return (True, r.stdout.decode('utf-8'), r.returncode, None)
+                return (True, r.stdout.decode('utf-8'), r.returncode % 256, None)
         # no stdin
         else:
             r = sp.run(args, stdout=sp.PIPE, stderr=sp.DEVNULL, timeout=EXEC_TIMEOUT)
-            return (True, r.stdout.decode('utf-8'), r.returncode, None)
+            return (True, r.stdout.decode('utf-8'), r.returncode % 256, None)
     except sp.TimeoutExpired:
         return (
             False,
             None,
             None,
-            f'{YELLOW}{BOLD}Time Limit Exceeded{END}{YELLOW}: Running ASM ({EXEC_TIMEOUT} s){END}'
+            f'{YELLOW}{BOLD}Time Limit Exceeded{END}{YELLOW} when running exe file ({EXEC_TIMEOUT} s).{END}'
         )
 
 
@@ -136,7 +133,7 @@ def check_ans(ans_str, correct_path, return_code, **kwargs) -> (bool, str):
             create_diff_bat()
             return (
                 False,
-                f'{RED}{BOLD}Wrong Answer{END}'
+                f'{RED}{BOLD}Wrong Answer{END}{RED}, run {kwargs["diff_path"]} for detail.{END}'
             )
             
         for i in range(len(ans_lines)):
@@ -145,13 +142,13 @@ def check_ans(ans_str, correct_path, return_code, **kwargs) -> (bool, str):
                 create_diff_bat()
                 return (
                     False,
-                    f'{RED}{BOLD}Wrong Answer{END}'
+                    f'{RED}{BOLD}Wrong Answer{END}{RED}, run {kwargs["diff_path"]} for detail.{END}'
                 )
                 
-        return (True, f'{GREEN}{BOLD}Accepted{END}')
+        return (True, f'{GREEN}{BOLD}Accepted.{END}')
 
 
-def judge_one(test_name, idx, total) -> bool:
+def judge_one(test_name, idx) -> bool:
     input_path = f'testcase/{test_name}.in'
     source_path = f'testcase/{test_name}.sy'
     correct_path = f'testcase/{test_name}.out'
@@ -178,7 +175,11 @@ def judge_one(test_name, idx, total) -> bool:
         return ok, msg
 
     ok, msg = run()
-    print(f'{BOLD}({idx}/{total}){END} {test_name}: {msg}')
+    if ok:
+        print(f'{GREEN}{BOLD}AC{END} ', end='')
+        sys.stdout.flush()
+    else:
+        print(f'\n{BOLD}({idx}){END} {test_name}: {msg}')
     return ok
 
         
@@ -200,20 +201,10 @@ def init():
     mkdir_empty('tmp')
     mkdir_empty('wa')
     mkdir('wa/wa_out')
-
-    def signal_handler(signal, frame):
-        total = passed + failed
-        print(f'\n{BOLD}Test Interrupted!{END} {GREEN}{BOLD}Accepted: ({passed}/{total}){END} {RED}{BOLD}Failed: ({failed}/{total}){END}')
-        cleanup()
-        sys.exit(0)
-
-    atexit.register(cleanup)
-    signal.signal(signal.SIGINT, signal_handler)
     
 
-
-if __name__ == '__main__':
-
+# return True means all AC
+def main() -> bool:
     init()
     print(f'{BOLD}Compiling Java...{END}')
     compile_compiler()
@@ -222,11 +213,11 @@ if __name__ == '__main__':
     print(f'{BOLD}Test start!{END} You can press Ctrl-C to cancel')
 
     num_cores = multiprocessing.cpu_count()
-    print(f'{BOLD}Running on{END} {YELLOW}{BOLD}{num_cores}{END} {BOLD}cores!{END}')
+    print(f'{BOLD}Running{END} {YELLOW}{BOLD}{len(test_list)}{END} {BOLD}tests on{END} {YELLOW}{BOLD}{num_cores}{END} {BOLD}cores!{END}')
     
     executor = cf.ProcessPoolExecutor(max_workers=num_cores)
-    futures = [executor.submit(judge_one, test_name, idx, len(test_list))
-               for idx, test_name in test_list[79:80]]
+    futures = [executor.submit(judge_one, test_name, idx)
+               for idx, test_name in test_list]
     
     result_list = []
     for future in cf.as_completed(futures):
@@ -238,4 +229,7 @@ if __name__ == '__main__':
               
     print(f'\n{BOLD}Test Finished!{END} {GREEN}{BOLD}Accepted: ({passed}/{total}){END} {RED}{BOLD}Failed: ({total - passed}/{total}){END}')
     cleanup()
-    input('Press Enter to Exit')
+    input('Press Enter to Exit') # comment this line when CI/CD
+    return passed == total
+
+main()
