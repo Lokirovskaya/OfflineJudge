@@ -52,7 +52,7 @@ def source_to_llvm(source_path, llvm_path, **kwargs) -> (bool, Optional[str]):
         '-w'
     ]
     try:
-        r = sp.run(args, timeout=COMPILE_TIMEOUT, stdout=sp.DEVNULL, stderr=sp.PIPE)
+        r = sp.run(args, timeout=COMPILE_TIMEOUT, stdout=sp.PIPE, stderr=sp.PIPE)
     except sp.TimeoutExpired:
         return (
             False,
@@ -60,8 +60,9 @@ def source_to_llvm(source_path, llvm_path, **kwargs) -> (bool, Optional[str]):
         )
 
     if r.returncode != 0:
-        with open(kwargs['re_path'], 'w') as re_file:
-            re_file.write(r.stderr.decode('utf-8'))
+        with open(kwargs['re_path'], 'wb') as re_file:
+            re_file.write(r.stdout)
+            re_file.write(r.stderr)
         return (
             False,
             f'{YELLOW}{BOLD}Runtime Error{END}{YELLOW}: Source -> LLVM IR{END}'
@@ -79,10 +80,11 @@ def llvm_to_exe(llvm_path, exe_path, **kwargs) -> (bool, Optional[str]):
         '-O0',
         '-v'
     ]
-    r = sp.run(args, stdout=sp.DEVNULL, stderr=sp.PIPE)
+    r = sp.run(args, stdout=sp.PIPE, stderr=sp.PIPE)
     if r.returncode != 0:
-        with open(kwargs['re_path'], 'w') as re_file:
-            re_file.write(r.stderr.decode('utf-8'))
+        with open(kwargs['re_path'], 'wb') as re_file:
+            re_file.write(r.stdout)
+            re_file.write(r.stderr)
         return (
             False,
             f'{YELLOW}{BOLD}Runtime Error{END}{YELLOW}: LLVM IR -> ASM{END}'
