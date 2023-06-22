@@ -15,7 +15,7 @@ int getch() {
 
 float getfloat() {
     float n;
-    scanf("%f", &n);
+    scanf("%a", &n);
     return n;
 }
 
@@ -32,7 +32,7 @@ int getfarray(float a[]) {
     int n;
     scanf("%d", &n);
     for (int i = 0; i < n; i++) {
-        scanf("%f", &a[i]);
+        scanf("%a", &a[i]);
     }
     return n;
 }
@@ -54,13 +54,26 @@ void putarray(int n, int a[]) {
 }
 
 void putfloat(float a) {
-    printf("%f", a);
+    char buff[32];
+    int len = snprintf(buff, 32, "%a", a);
+    char* exp = buff + len;
+    if (!('0' <= buff[len - 1] && buff[len - 1] <= '9')) {
+        printf("%s", buff);
+        return;
+    }
+    while (*exp != 'p') exp--;
+    char* z = exp - 1;
+    while (*(z - 1) == '0') z--;
+    if (*(z - 1) == '.') z--;
+    *z = '\0';
+    printf("%s%s", buff, exp);
 }
 
 void putfarray(int n, float a[]) {
     printf("%d:", n);
     for (int i = 0; i < n; i++) {
-        printf(" %f", a[i]);
+        putch(' ');
+        putfloat(a[i]);
     }
     printf("\n");
 }
