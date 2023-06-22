@@ -117,7 +117,8 @@ def run_exe(exe_path, input_path, **kwargs) -> (bool, Optional[str], Optional[in
 def check_answer(answer_str, correct_path, return_code, **kwargs) -> (bool, str):
     def dump_wa(wa_lines):
         with open(kwargs['wa_path'], 'w') as wa_file:
-            wa_file.writelines(wa_lines)
+            for line in wa_lines:
+                print(line, file=wa_file)
     def create_diff_bat():
         with open(kwargs['diff_path'], 'w') as diff_file:
             diff_file.write(f'code --diff ../{kwargs["wa_path"]} ../{correct_path}')
@@ -225,7 +226,7 @@ if __name__ == '__main__':
     
     executor = cf.ProcessPoolExecutor(max_workers=num_cores)
     futures = [executor.submit(judge_one, test_name, idx, len(test_list))
-               for idx, test_name in test_list]
+               for idx, test_name in test_list[79:80]]
     
     result_list = []
     for future in cf.as_completed(futures):
